@@ -30,6 +30,7 @@ RUN printf 'Listen ${PORT}\n' > /etc/apache2/ports.conf \
         storage/app/private storage/app/public storage/framework/cache/data \
         storage/framework/sessions storage/framework/views storage/logs \
     && composer install --no-dev --prefer-dist --no-interaction --no-progress --no-scripts --optimize-autoloader \
+    && composer check-platform-reqs --no-dev \
     && sed -i 's/\r$//' deploy/start.sh \
     && chmod +x deploy/start.sh \
     && chown -R www-data:www-data storage bootstrap/cache
