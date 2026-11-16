@@ -3,14 +3,59 @@
 namespace App\Services;
 
 use Carbon\Carbon;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CourierDeliveryProofService
 {
+    /** Prefer the main web schema while preserving older rider installations. */
+    public static function table(): ?string
+    {
+        $attributes = request()->attributes;
+        if ($attributes->has('courier_proof_table')) {
+            return $attributes->get('courier_proof_table') ?: null;
+        }
+        foreach (['delivery_proofs', 'order_delivery_proofs'] as $table) {
+            if (Schema::hasTable($table)) {
+                $attributes->set('courier_proof_table', $table);
+
+                return $table;
+            }
+        }
+        $attributes->set('courier_proof_table', false);
+
+        return null;
+    }
+
+    public static function withMetadata(Builder $query): Builder
+    {
+        $table = self::table();
+
+        return $table === null
+            ? $query->selectRaw('NULL as delivery_proof_id, NULL as proof_captured_at')
+            : $query->leftJoin($table.' as proof', 'proof.order_id', '=', 'o.id')
+                ->addSelect('proof.id as delivery_proof_id', 'proof.captured_at as proof_captured_at');
+    }
+
+    public function record(array $stored, array $metadata, int $hubId): array
+    {
+        if (self::table() === 'delivery_proofs') {
+            return [
+                'image_path' => $stored['path'], 'thumbnail_path' => $stored['path'],
+                'mime_type' => $stored['mime_type'], 'size_bytes' => $stored['size_bytes'],
+                'logistics_profile_id' => $hubId, 'uploaded_at' => $metadata['created_at'],
+                ...$metadata,
+            ];
+        }
+
+        return [...$stored, ...$metadata];
+    }
+
     public function validate(Request $request): array
     {
         abort_if((int) $request->server('CONTENT_LENGTH', 0) > 6 * 1024 * 1024,

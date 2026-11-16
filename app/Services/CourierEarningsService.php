@@ -167,10 +167,8 @@ class CourierEarningsService
     public function history(CourierProfile $courier, array $range): array
     {
         $finished = $this->deliveredAt();
-        $page = $this->deliveries($courier, $range)
-            ->leftJoin('order_delivery_proofs as proof', 'proof.order_id', '=', 'o.id')
-            ->select('o.id', 'o.order_number', 'o.waybill_code', 'o.rider_pay', 'o.earnings_recorded_at')
-            ->addSelect('proof.id as delivery_proof_id', 'proof.captured_at as proof_captured_at')
+        $page = CourierDeliveryProofService::withMetadata($this->deliveries($courier, $range)
+            ->select('o.id', 'o.order_number', 'o.waybill_code', 'o.rider_pay', 'o.earnings_recorded_at'))
             ->selectRaw("$finished as finished_at")
             ->orderByRaw("$finished desc")->orderByDesc('o.id')->paginate(20);
         $paid = app(CourierMoneyService::class)->paidOrderIds($courier->id, $page->getCollection()->pluck('id')->all());

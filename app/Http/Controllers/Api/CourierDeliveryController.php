@@ -441,13 +441,14 @@ class CourierDeliveryController extends Controller
     {
         $data = $proofs->validate($r);
         $me = $this->me($r);
-        abort_unless(Schema::hasTable('order_delivery_proofs'), 503,
+        $proofTable = $proofs::table();
+        abort_unless($proofTable, 503,
             'Delivery photo storage is not ready. Please contact your hub and retry later.');
         $stored = null;
         $readyToCommit = false;
 
         try {
-            $result = DB::transaction(function () use ($r, $column, $value, $data, $me, $earnings, $proofs, &$stored, &$readyToCommit) {
+            $result = DB::transaction(function () use ($r, $column, $value, $data, $me, $earnings, $proofs, $proofTable, &$stored, &$readyToCommit) {
                 $order = DB::table('orders')->where($column, $value)
                     ->where('delivery_rider_id', $me->id)->lockForUpdate()->first();
                 abort_unless($order, 403, 'This delivery is not assigned to you.');
@@ -456,7 +457,7 @@ class CourierDeliveryController extends Controller
 
                 // A retry returns the original snapshot, even if the rate has changed.
                 if (in_array($order->status, ['DELIVERED', 'COMPLETED'], true)) {
-                    $proof = DB::table('order_delivery_proofs')->where('order_id', $order->id)->first();
+                    $proof = DB::table($proofTable)->where('order_id', $order->id)->first();
 
                     return ['earning' => $earnings->snapshot($order),
                         'proof' => $proofs::metadata($proof !== null, $proof?->captured_at)];
@@ -468,7 +469,7 @@ class CourierDeliveryController extends Controller
                 // cannot replace the original proof, COD, earning or tracking event.
                 $stored = $proofs->store($r->file('proof_image'));
                 $now = Carbon::now('UTC');
-                $proof = array_merge($stored, [
+                $proof = $proofs->record($stored, [
                     'order_id' => $order->id,
                     'courier_id' => $me->id,
                     'captured_at' => isset($data['captured_at']) ? Carbon::parse($data['captured_at'])->utc()->format('Y-m-d H:i:s') : null,
@@ -477,8 +478,8 @@ class CourierDeliveryController extends Controller
                     'notes' => $data['notes'] ?? null,
                     'created_at' => $now,
                     'updated_at' => $now,
-                ]);
-                DB::table('order_delivery_proofs')->insert($proof);
+                ], $me->logistics_profile_id);
+                DB::table($proofTable)->insert($proof);
                 $rate = $earnings->currentRate($me->logistics_profile_id, $now);
                 $update = [
                     'status' => 'DELIVERED',
@@ -617,10 +618,8 @@ class CourierDeliveryController extends Controller
 
         $finished = 'coalesce(d.finished_at, o.updated_at)';
 
-        $q = $this->orderSelect()
+        $q = CourierDeliveryProofService::withMetadata($this->orderSelect())
             ->leftJoinSub($done, 'd', 'd.order_id', '=', 'o.id')
-            ->leftJoin('order_delivery_proofs as proof', 'proof.order_id', '=', 'o.id')
-            ->addSelect('proof.id as delivery_proof_id', 'proof.captured_at as proof_captured_at')
             ->addSelect(DB::raw("$finished as finished_at"))
             ->where('o.delivery_rider_id', $me->id)
             ->whereIn('o.status', $statuses);

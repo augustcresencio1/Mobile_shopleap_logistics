@@ -61,6 +61,11 @@ to the live Render service.
   Missing or inconsistent financial data rolls back the delivery and removes the
   new proof file. A committed retry returns the original snapshot without posting
   again. Missing rates keep pay unavailable while recording real collected cash.
+- Proof metadata reads and writes now support the main web `delivery_proofs`
+  schema as well as the older rider `order_delivery_proofs` schema. History reads
+  remain available when neither table is installed; a new delivery still requires
+  working proof storage. Main-web proof rows include the frozen hub and upload
+  timestamp and keep private image paths out of mobile responses.
 
 ## Render deployment
 
@@ -96,7 +101,7 @@ compatible backend fixes after the same Render API URL is redeployed.
 
 - Full Flutter suite: 219 passed. Final startup test also checks that unvisited
   account tabs do not make extra profile requests.
-- Full Laravel suite: 102 tests, 1,377 assertions, passed on isolated in-memory
+- Full Laravel suite: 104 tests, 1,401 assertions, passed on isolated in-memory
   SQLite. Mail tests use synthetic credentials and mocked HTTPS responses.
 - Flutter analysis: no errors or warnings; existing informational findings remain.
 - Release APK built for ARM32, ARM64 and x86-64; Android signature verified.

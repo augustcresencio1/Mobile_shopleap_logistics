@@ -9,6 +9,27 @@ use Illuminate\Support\Facades\Schema;
 /** The shared financial tables needed by the rider, only in isolated SQLite tests. */
 class CourierLedgerSchema
 {
+    public static function createMainWebDeliveryProofs(): void
+    {
+        Schema::create('delivery_proofs', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('order_id')->unique()->constrained();
+            $table->unsignedBigInteger('courier_id');
+            $table->unsignedBigInteger('logistics_profile_id');
+            $table->string('image_path');
+            $table->string('thumbnail_path');
+            $table->string('mime_type', 50);
+            $table->unsignedBigInteger('size_bytes');
+            $table->timestampTz('captured_at')->nullable();
+            $table->timestampTz('uploaded_at');
+            $table->decimal('latitude', 10, 7)->nullable();
+            $table->decimal('longitude', 10, 7)->nullable();
+            $table->string('notes', 255)->nullable();
+            $table->timestampTz('expired_at')->nullable();
+            $table->timestamps();
+        });
+    }
+
     public static function create(): void
     {
         Schema::create('wallet_accounts', function (Blueprint $table) {

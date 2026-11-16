@@ -497,7 +497,7 @@ class CourierEarningsTest extends TestCase
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'courier_profiles')));
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'rider_rates')));
         // Paid/unpaid totals, paid-order badges and three cached schema checks add six queries.
-        $this->assertLessThanOrEqual(11, $queries->count());
+        $this->assertLessThanOrEqual(13, $queries->count());
         DB::disableQueryLog();
     }
 
@@ -819,6 +819,43 @@ class CourierEarningsTest extends TestCase
 
         return LedgerService::decimal($entries->sum(fn ($entry) => LedgerService::cents((string) $entry->amount)
             * (($entry->direction === 'debit') === $debitNormal ? 1 : -1)));
+    }
+
+    public function test_main_web_proof_schema_saves_delivery_and_loads_both_histories_without_legacy_table(): void
+    {
+        Schema::drop('order_delivery_proofs');
+        CourierLedgerSchema::createMainWebDeliveryProofs();
+        $this->rate();
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+        $path = $this->deliveryPath($id);
+        $first = $this->submitDelivery($path, ['captured_at' => '2026-11-08T03:59:00Z'])->assertOk()
+            ->assertJsonPath('proof.uploaded', true)->json();
+        $saved = DB::table('delivery_proofs')->where('order_id', $id)->first();
+        $this->assertSame(1, $saved->logistics_profile_id);
+        $this->assertNotNull($saved->uploaded_at);
+        Storage::disk('r2_private')->assertExists($saved->image_path);
+        $this->assertSame($saved->image_path, $saved->thumbnail_path);
+        foreach (['history', 'earnings/history?period=all'] as $endpoint) {
+            $this->getJson('/api/courier/'.$endpoint)->assertOk()->assertJsonPath('data.0.proof.uploaded', true);
+        }
+        $this->getJson('/api/courier/cash/summary')->assertOk()->assertJsonPath('cash_on_hand', '140.00');
+        $this->submitDelivery($path, ['amount' => '999.00'])->assertOk()->assertExactJson($first);
+        $this->assertDatabaseCount('delivery_proofs', 1);
+        $this->assertDatabaseCount('ledger_transactions', 2);
+    }
+
+    public function test_missing_proof_tables_do_not_break_home_or_earnings_history_reads(): void
+    {
+        Schema::drop('order_delivery_proofs');
+        $this->order(['rider_pay' => '20.25']);
+        $this->getJson('/api/courier/home')->assertOk();
+        foreach (['history', 'earnings/history?period=all'] as $endpoint) {
+            $this->getJson('/api/courier/'.$endpoint)->assertOk()->assertJsonPath('data.0.proof.uploaded', false);
+        }
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+        $this->submitDelivery($this->deliveryPath($id))->assertStatus(503);
+        $this->assertDatabaseHas('orders', ['id' => $id, 'status' => 'OUT_FOR_DELIVERY']);
+        $this->assertSame([], Storage::disk('r2_private')->allFiles());
     }
 
     private function assertBalancedPostings(): void
