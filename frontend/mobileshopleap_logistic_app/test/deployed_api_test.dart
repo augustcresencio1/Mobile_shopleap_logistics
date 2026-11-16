@@ -55,7 +55,7 @@ void main() {
         ApiConfig.baseUrl,
         const String.fromEnvironment(
           'API_BASE_URL',
-          defaultValue: 'https://shopleap.shop/api',
+          defaultValue: ApiConfig.productionBaseUrl,
         ),
       );
       await http.runWithClient(

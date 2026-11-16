@@ -10,12 +10,12 @@ Required names: `APP_KEY`, `APP_URL`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_U
 
 The image sets production mode, debug off, PostgreSQL with required TLS, private R2 uploads, file cache/sessions, synchronous queues, trusted ingress proxies, and CA bundle paths. Public `/up` does not query application tables. Apache binds to Render's `PORT`; access logs omit query strings, credentials, and request bodies. No migrations or seeders are copied into the runtime image.
 
-## Cutover is a separate step
+## Current rider APK and deferred features
 
-The current published APK continues to use `https://shopleap.shop/api`. Do not switch it to this local backend until the documented API differences and phone checks are resolved. See `docs/mobile-api-route-audit.md` and `docs/rider-money-integration.md`: this local backend is missing cash/receipt and notification read routes and some response fields. Completing those features was deferred by the owner.
+The owner requested a separate rider APK connected directly to this service while deferring missing backend features. The current build `20261117` uses `https://shopleap-rider-api-august.onrender.com/api`; see `docs/RIDER_RENDER_APK_2026-11-16.md` for its link and checks. See `docs/mobile-api-route-audit.md`, `docs/mobile-account-integration.md`, and `docs/rider-money-integration.md` for the missing cash/receipt, account and notification route/response details. Those features are not represented as working in this release.
 
 Render Free blocks outbound SMTP ports. The existing Gmail SMTP configuration alone cannot deliver OTP here. An HTTPS email relay/provider must be configured and tested before using this backend for registration or password reset. Startup prints that limitation without printing any email content or credentials. No OTP delivery is claimed by a passing health check.
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_KEY` enable this backend's realtime broadcasts. They are absent from the current local environment; the existing app and web backend retain their current realtime behavior while the APK stays on the web API.
+`SUPABASE_URL` and `SUPABASE_SERVICE_KEY` enable this backend's realtime broadcasts. They are absent from the current local environment. Configuring this service's realtime broadcasts remains pending; the existing web backend is unchanged.
 
-Warm up a Free service by opening its `/up` URL a few minutes before the presentation. It can sleep after 15 idle minutes. Test with mobile data and the development PC turned off before switching the APK to the new API.
+Warm up a Free service by opening its `/up` URL a few minutes before the presentation. It can sleep after 15 idle minutes. Rehearse this APK with mobile data and the development PC turned off before the presentation.

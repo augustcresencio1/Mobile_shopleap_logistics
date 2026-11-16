@@ -23,14 +23,14 @@ The isolated package check also passed package discovery, config/route/view cach
 
 ## Current APK and remaining work
 
-The [published rider APK](https://pub-08abb33dded04b0daaa0e3029235c29c.r2.dev/mobile-demo/2026-11-17/Shopleap-Rider-b4889fbc7266.apk) still uses `https://shopleap.shop/api`. It has not been switched to Render. See `ANDROID_RELEASE_2026-11-16.md` for installation and compatible APK updates.
+The owner subsequently requested an APK connected directly to this rider Render service while deferring the missing backend features. The new [Render-connected rider APK](https://pub-08abb33dded04b0daaa0e3029235c29c.r2.dev/mobile-demo/2026-11-17/Shopleap-Rider-Render-c858c09df3ce.apk) is build `20261117` and uses `https://shopleap-rider-api-august.onrender.com/api`. See `RIDER_RENDER_APK_2026-11-16.md` for installation and compatible APK updates. The earlier build `20261116` used the web API.
 
-Before changing the app to the Render API:
+Remaining backend work and phone verification:
 
 1. Complete or integrate the missing cash, receipt, notification-read, account and other route/response differences described in `mobile-api-route-audit.md`, `mobile-account-integration.md`, and `rider-money-integration.md`. Do not manufacture financial records or apply shared-database migrations.
 2. Configure and test an HTTPS OTP mail relay. This service currently preserves the local SMTP configuration, but SMTP cannot deliver from Render Free. Registration and password-reset mail are **not verified or ready** on this service.
 3. Configure `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` if this backend must broadcast rider updates; the current local environment did not include them. Preserve the existing online app's behavior while cutover is pending.
 4. Rehearse approved rider login, home, pickup/delivery, proof upload, camera/GPS, chat, financial reads and receipt ownership on the new backend. The public checks above do not prove signed-in behavior.
-5. Build a new APK with the Render API URL, the same package and signing key, and a higher build number, then verify and distribute it.
+5. Future Flutter changes require another APK with the same package and signing key and a build number higher than `20261117`. Compatible backend fixes can be deployed at the same API URL without rebuilding the app.
 
 Open `/up` a few minutes before a demo to wake a sleeping Free service, then wait for the health response and sign in. Keep mobile data available and test with the development PC turned off.

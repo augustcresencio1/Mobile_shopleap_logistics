@@ -1,5 +1,7 @@
 # Shopleap Rider Android release — November 16, 2026
 
+**Earlier build:** this document describes the original web-API APK, build `20261116`. For the current rider APK connected directly to August's Render service, use [RIDER_RENDER_APK_2026-11-16.md](RIDER_RENDER_APK_2026-11-16.md), build `20261117`.
+
 This APK uses the local rider application uploaded to `augustcresencio1/Mobile_shopleap_logistics` in commit `6caba1b`, with the launcher label changed to **Shopleap Rider** and cleartext network traffic explicitly disabled.
 
 **[Download Shopleap Rider APK](https://pub-08abb33dded04b0daaa0e3029235c29c.r2.dev/mobile-demo/2026-11-17/Shopleap-Rider-b4889fbc7266.apk)** — 81,118,926 bytes (approximately 77.4 MiB), version `1.0.0`, build `20261116`.
