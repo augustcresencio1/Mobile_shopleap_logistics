@@ -1,5 +1,7 @@
 # Rider backend on Render Free
 
+Deployment is Live at https://shopleap-rider-api-august.onrender.com. See `docs/RENDER_DEPLOYMENT_2026-11-16.md` for the verified results, current APK URL, and remaining cutover work.
+
 Create a Docker web service from `augustcresencio1/Mobile_shopleap_logistics`, branch `main`. Select **Free** and **Singapore**. Leave Root Directory empty. Use Dockerfile Path `./Dockerfile`, Docker Build Context `.`, and Health Check Path `/up`. Automatic deploys stay off. The Docker build context contains backend source only.
 
 Inject the existing local configuration as environment variables. Never commit it, generate a different APP_KEY, run migrations, seed the shared database, or upload local storage contents.
