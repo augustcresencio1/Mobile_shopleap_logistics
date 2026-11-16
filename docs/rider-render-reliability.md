@@ -9,9 +9,10 @@ to the live Render service.
   `augustcresencio1/Mobile_shopleap_logistics`, branch `main`.
 - Public live checks returned `/up` 200, `/api/hubs` 200,
   `/api/courier/home` 401 and `/api/courier/cash/summary` 404.
-- The rider repository has no cash ledger, cash handover, payout or money receipt
-  implementation. Its earnings service reads saved order earnings but cannot
-  supply paid/unpaid totals without the financial backend.
+- The rider repository originally lacked cash, receipt and stored-notification
+  endpoints and paid/unpaid earnings fields. A read adapter now exposes the
+  existing web ledger records; no replacement balances or historical entries
+  are generated.
 - Historical local logs show SQLSTATE 26000, prepared statement does not exist,
   on Supabase's transaction pooler, port 6543. The PostgreSQL connection now
   enables PDO emulated prepares by default; `DB_EMULATE_PREPARES=false` can opt out.
@@ -43,6 +44,16 @@ to the live Render service.
   approval. Province and municipality are now saved by the profile controller.
 - The APK targets the rider Render API, retains the existing application ID and
   development signing key, and uses build number 20261118 / version 1.0.1.
+- `CourierMoneyService` follows the main web app's `MoneyMovementQueries` and
+  `PayoutQueries`: only frozen rider ownership and unreversed delivery postings
+  qualify for cash/payout calculations. Handover allocations reduce parcel cash;
+  shortages are already part of cash on hand. Current hub changes never reassign
+  old money. Paid/unpaid totals use delivery dates rather than payout dates.
+- Cash summary/history, rider-owned handover/payout HTML receipts, and stored
+  notification read/read-all routes match the existing APK. Receipts are native
+  HTML with inline styles and escaped values, without web build assets or scripts.
+  Paid/unpaid values remain unavailable when payout tables are missing; cash
+  returns a 503 instead of pretending that an absent schema means zero cash.
 
 ## Render deployment
 
@@ -75,15 +86,26 @@ compatible backend fixes after the same Render API URL is redeployed.
 
 - Full Flutter suite: 219 passed. Final startup test also checks that unvisited
   account tabs do not make extra profile requests.
-- Full Laravel suite: 86 tests, 1,183 assertions, passed on isolated in-memory
+- Full Laravel suite: 95 tests, 1,263 assertions, passed on isolated in-memory
   SQLite. Mail tests use synthetic credentials and mocked HTTPS responses.
 - Flutter analysis: no errors or warnings; existing informational findings remain.
 - Release APK built for ARM32, ARM64 and x86-64; Android signature verified.
 - No phone is connected. Installed-app upgrade, approved-rider live login, GPS,
   real OTP delivery, signed-in earnings and money/receipt ownership remain to be
   verified after backend deployment.
-- `delmundo-maverick/Shopleap-Web-App` could not be fetched with the available
-  GitHub credentials. The local copy at `C:/Users/PC/Downloads/Shopleap-Web-App`
-  is on a 24 October commit and lacks money code. Read access to the current
-  financial implementation is required to finish cash, receipts, paid/unpaid
-  earnings and notification-read integration. No replacement balances were made.
+- Git access subsequently succeeded. The authoritative money implementation was
+  inspected on `feature/money-remittance` at `bca762a` and the latest `main` at
+  `fb497769ca0345856a25cddf28c2c1baed848397` in
+  `delmundo-maverick/Shopleap-Web-App`. Reference source is in
+  `.reference/shopleap-money`; the old Downloads checkout was not changed.
+- This patch exposes saved financial records only. The standalone rider delivery
+  controller still does not call the web app's `OrderLedger::delivered`. The
+  canonical atomic posting flow, including current seller routing, must be
+  integrated before treating new rider-only deliveries as a complete accounting
+  cutover. Do not backfill old deliveries or create entries while loading Cash.
+- Before deploying, confirm the Render service uses the same PostgreSQL database
+  containing `ledger_transactions`, `rider_cash_handovers`,
+  `rider_cash_handover_items`, `rider_payouts`, `rider_payout_items`, and
+  `notifications`. These migrations belong to the main financial backend and
+  were not run from this workspace. No APK rebuild is needed for these compatible
+  backend read endpoints; the earlier Render APK already calls them.

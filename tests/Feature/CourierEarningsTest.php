@@ -491,7 +491,8 @@ class CourierEarningsTest extends TestCase
         $queries = collect(DB::getQueryLog());
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'courier_profiles')));
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'rider_rates')));
-        $this->assertLessThanOrEqual(5, $queries->count());
+        // One request-scoped schema check handles an older backend without money tables.
+        $this->assertLessThanOrEqual(6, $queries->count());
         DB::disableQueryLog();
     }
 

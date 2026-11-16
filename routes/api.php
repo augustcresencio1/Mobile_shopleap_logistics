@@ -2,9 +2,12 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CourierAuthController;
+use App\Http\Controllers\Api\CourierCashController;
 use App\Http\Controllers\Api\CourierDeliveryController;
 use App\Http\Controllers\Api\CourierEarningsController;
+use App\Http\Controllers\Api\CourierNotificationController;
 use App\Http\Controllers\Api\CourierProfileController;
+use App\Http\Controllers\Api\CourierReceiptController;
 use App\Http\Controllers\Api\RiderNavigationController;
 use App\Http\Controllers\Api\RiderTrackingController;
 use Illuminate\Support\Facades\Route;
@@ -41,6 +44,10 @@ Route::middleware(['auth:sanctum', 'role:courier'])->prefix('courier')->group(fu
         // BAGO: lahat ng kailangan ng Home tab at ng bell sa iisang request
         Route::get('home', [CourierDeliveryController::class, 'home']);
         Route::get('dashboard', [CourierEarningsController::class, 'dashboard']);
+        Route::get('cash/summary', [CourierCashController::class, 'summary']);
+        Route::get('cash/history', [CourierCashController::class, 'history']);
+        Route::get('receipts/{type}/{reference}', [CourierReceiptController::class, 'show'])
+            ->whereIn('type', ['cash-handovers', 'rider-payouts']);
 
         Route::get('pickup-requests', [CourierDeliveryController::class, 'pickupRequests']);
         Route::get('pickups', [CourierDeliveryController::class, 'pickups']);
@@ -50,7 +57,9 @@ Route::middleware(['auth:sanctum', 'role:courier'])->prefix('courier')->group(fu
         Route::post('tracking/start', [RiderTrackingController::class, 'start'])->middleware('throttle:30,1');
         Route::put('tracking/location', [RiderTrackingController::class, 'update'])->middleware('throttle:30,1');
         Route::post('tracking/stop', [RiderTrackingController::class, 'stop'])->middleware('throttle:30,1');
-        Route::get('notifications', [CourierDeliveryController::class, 'notifications']);
+        Route::get('notifications', [CourierNotificationController::class, 'index']);
+        Route::post('notifications/read-all', [CourierNotificationController::class, 'readAll']);
+        Route::post('notifications/{id}/read', [CourierNotificationController::class, 'read']);
         // Accept WB-/SL- references and legacy IDs, plus encoded QR URLs containing slashes.
         Route::get('orders/scan/{code}', [CourierDeliveryController::class, 'scan'])->where('code', '.*');
 

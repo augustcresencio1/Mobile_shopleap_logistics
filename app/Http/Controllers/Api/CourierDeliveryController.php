@@ -209,7 +209,7 @@ class CourierDeliveryController extends Controller
             ->limit(3)
             ->get();
 
-        $earned = $earnings->summary($me, $earnings->range(['period' => 'week']), ['amount' => null]);
+        $earned = $earnings->summary($me, $earnings->range(['period' => 'week']), ['amount' => null], includePayouts: false);
         $today = collect($earned['daily'])->firstWhere('date', Carbon::now(CourierEarningsService::TIMEZONE)->toDateString());
 
         // Items ng lahat ng order: isang query lang
