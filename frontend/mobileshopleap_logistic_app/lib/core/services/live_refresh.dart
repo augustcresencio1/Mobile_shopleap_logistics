@@ -96,7 +96,8 @@ class LiveRefresh {
   static void _setFallback(Duration every) {
     _fallbackTimer?.cancel();
     _fallbackTimer = Timer.periodic(every, (_) {
-      ApiClient.invalidateCache();
+      // A slow request must finish before a polling tick starts another copy.
+      ApiClient.invalidateCache(keepPending: true);
       _polling = true;
       try {
         pokeNow();

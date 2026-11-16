@@ -140,7 +140,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     LiveRefresh.start(Courier.current.id);
     _loadNotifs();
     _loadChatUnread();
-    _warmTabs();
     _notifTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) => _loadNotifs(),
@@ -195,15 +194,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       MaterialPageRoute(builder: (_) => const AuthGate()),
       (route) => false,
     );
-  }
-
-  Future<void> _warmTabs() async {
-    // Money screens load fresh on entry, without background financial polling.
-    try {
-      await OrderService.home();
-    } catch (_) {}
-    if (!mounted || _sessionEnding) return;
-    setState(() => _readyPages.addAll({1, 2, 4, 5, 6, 7, 8}));
   }
 
   void _clearNotificationSession() {
@@ -539,11 +529,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _ => order.backendStatus.replaceAll('_', ' ').toLowerCase(),
   };
 
-  int get _pickupCount =>
-      _pickupCountValue;
+  int get _pickupCount => _pickupCountValue;
 
-  int get _deliverCount =>
-      _deliverCountValue;
+  int get _deliverCount => _deliverCountValue;
 
   Widget _tasksSwitcher() {
     return Padding(

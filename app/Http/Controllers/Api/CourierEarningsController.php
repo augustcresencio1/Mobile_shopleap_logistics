@@ -59,7 +59,7 @@ class CourierEarningsController extends Controller
             ->pluck('total', 'pickup_status');
         $deliveries = DB::table('orders')->where('delivery_rider_id', $courier->id)
             ->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
-        $today = $earnings->summary($courier, $earnings->range(['period' => 'today']));
+        $today = $earnings->summary($courier, $earnings->range(['period' => 'today']), includePayouts: false);
 
         return response()->json([
             'pickups' => [

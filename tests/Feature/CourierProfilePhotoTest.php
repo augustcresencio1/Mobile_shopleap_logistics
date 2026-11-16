@@ -64,6 +64,23 @@ class CourierProfilePhotoTest extends TestCase
     public function test_photo_route_exists_and_requires_authentication(): void
     {
         $this->postJson('/api/courier/account/photo')->assertUnauthorized();
+        $this->postJson('/api/courier/account/avatar')->assertUnauthorized();
+        $this->deleteJson('/api/courier/account/avatar')->assertUnauthorized();
+    }
+
+    public function test_pending_couriers_can_upload_and_remove_their_own_avatar(): void
+    {
+        Sanctum::actingAs(User::findOrFail(1));
+        $this->courier->update(['status' => 'pending']);
+        $this->postJson('/api/courier/account/avatar', ['avatar' => $this->photo()])
+            ->assertOk()->assertJsonPath('courier.id', 10);
+        $path = $this->courier->fresh()->profile_photo_path;
+        Storage::disk('r2_private')->assertExists($path);
+        $this->deleteJson('/api/courier/account/avatar')
+            ->assertOk()->assertJsonPath('courier.photo_url', null);
+        Storage::disk('r2_private')->assertMissing($path);
+        $this->assertNull($this->courier->fresh()->profile_photo_path);
+        $this->deleteJson('/api/courier/account/avatar')->assertOk();
     }
 
     public function test_multipart_photo_is_saved_on_the_courier_and_returned_as_an_absolute_signed_url(): void

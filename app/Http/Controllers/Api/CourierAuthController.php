@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -20,7 +21,7 @@ class CourierAuthController extends Controller
 
     private function key(string $email): string
     {
-        return 'courier_reg:' . strtolower(trim($email));
+        return 'courier_reg:'.strtolower(trim($email));
     }
 
     private function sendOtp(string $email, string $otp): void
@@ -48,16 +49,9 @@ class CourierAuthController extends Controller
     public function register(Request $request)
     {
         // Tanggapin ang v4 field names (hub_id, or_cr_upload, license_upload)
-        if ($request->has('hub_id') && !$request->has('logistics_profile_id')) {
+        if ($request->has('hub_id') && ! $request->has('logistics_profile_id')) {
             $request->merge(['logistics_profile_id' => $request->input('hub_id')]);
         }
-        if ($request->hasFile('or_cr_upload') && !$request->hasFile('or_cr')) {
-            
-        }
-        if ($request->hasFile('license_upload') && !$request->hasFile('license')) {
-            
-        }
-
         $data = $request->validate([
             'last_name' => 'required|string|max:100',
             'first_name' => 'required|string|max:100',
@@ -78,26 +72,56 @@ class CourierAuthController extends Controller
             'license_upload' => 'required|image|max:5120',
         ]);
 
-        // Temp files: sa local disk (hindi sa public bucket)
-        $dir = 'pending_couriers/' . Str::uuid();
-        $orCrPath = $request->file('or_cr_upload')->store($dir, 'local');
-        $licensePath = $request->file('license_upload')->store($dir, 'local');
+        // A failed upload/cache/email must not leave a half-submitted registration.
+        $dir = 'pending_couriers/'.Str::uuid();
+        $stage = 'documents';
+        try {
+            $orCrPath = $request->file('or_cr_upload')->store($dir, 'local');
+            $licensePath = $request->file('license_upload')->store($dir, 'local');
+            if (! $orCrPath || ! $licensePath) {
+                throw new \RuntimeException('Registration document storage failed.');
+            }
 
-        $payload = collect($data)->except(['password', 'password_confirmation', 'or_cr_upload', 'license_upload'])->all();
-        $payload['password'] = Hash::make($data['password']);
-        $payload['or_cr_path'] = $orCrPath;
-        $payload['license_path'] = $licensePath;
-        $payload['dir'] = $dir;
+            $payload = collect($data)->except(['password', 'password_confirmation', 'or_cr_upload', 'license_upload'])->all();
+            $payload['password'] = Hash::make($data['password']);
+            $payload['or_cr_path'] = $orCrPath;
+            $payload['license_path'] = $licensePath;
+            $payload['dir'] = $dir;
+            $otp = (string) random_int(100000, 999999);
 
-        $otp = (string) random_int(100000, 999999);
+            $stage = 'cache';
+            if (! Cache::put($this->key($data['email']), [
+                'otp_hash' => Hash::make($otp),
+                'attempts' => 0,
+                'data' => $payload,
+            ], now()->addMinutes(self::OTP_MINUTES))) {
+                throw new \RuntimeException('Registration cache write failed.');
+            }
 
-        Cache::put($this->key($data['email']), [
-            'otp_hash' => Hash::make($otp),
-            'attempts' => 0,
-            'data' => $payload,
-        ], now()->addMinutes(self::OTP_MINUTES));
+            $stage = 'email';
+            $this->sendOtp($data['email'], $otp);
+        } catch (\Throwable $exception) {
+            // Never log an email, password, document, OTP, or SMTP credentials.
+            Log::error('Courier registration unavailable.', [
+                'stage' => $stage,
+                'exception_type' => get_class($exception),
+            ]);
+            try {
+                Cache::forget($this->key($data['email']));
+                Storage::disk('local')->deleteDirectory($dir);
+            } catch (\Throwable $cleanupException) {
+                Log::warning('Courier registration cleanup failed.', [
+                    'exception_type' => get_class($cleanupException),
+                ]);
+            }
 
-        $this->sendOtp($data['email'], $otp);
+            return response()->json([
+                'code' => $stage === 'email' ? 'REGISTRATION_EMAIL_UNAVAILABLE' : 'REGISTRATION_UNAVAILABLE',
+                'message' => $stage === 'email'
+                    ? 'Verification email could not be sent. Please try again later.'
+                    : 'Registration is temporarily unavailable. Please try again later.',
+            ], 503);
+        }
 
         return response()->json(['message' => 'Verification code sent to your email.'], 201);
     }
@@ -110,16 +134,18 @@ class CourierAuthController extends Controller
         $key = $this->key($request->email);
         $pending = Cache::get($key);
 
-        if (!$pending) {
+        if (! $pending) {
             return response()->json(['message' => 'Code expired. Please register again.'], 422);
         }
         if ($pending['attempts'] >= 5) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Too many attempts. Please register again.'], 429);
         }
-        if (!Hash::check($request->otp, $pending['otp_hash'])) {
+        if (! Hash::check($request->otp, $pending['otp_hash'])) {
             $pending['attempts']++;
             Cache::put($key, $pending, now()->addMinutes(self::OTP_MINUTES));
+
             return response()->json(['message' => 'Invalid verification code.'], 422);
         }
 
@@ -127,15 +153,16 @@ class CourierAuthController extends Controller
         $local = Storage::disk('local');
 
         // Siguraduhing nandoon pa ang temp files bago gumawa ng user
-        if (!$local->exists($d['or_cr_path']) || !$local->exists($d['license_path'])) {
+        if (! $local->exists($d['or_cr_path']) || ! $local->exists($d['license_path'])) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Uploaded files not found. Please register again.'], 422);
         }
 
         $user = DB::transaction(function () use ($d, $local) {
-            $user = new User();
+            $user = new User;
             $user->forceFill([
-                'name' => trim($d['first_name'] . ' ' . $d['last_name']),
+                'name' => trim($d['first_name'].' '.$d['last_name']),
                 'email' => $d['email'],
                 'password' => $d['password'],
                 'role' => 'courier',
@@ -143,8 +170,8 @@ class CourierAuthController extends Controller
             ])->save();
 
             $final = "couriers/{$user->id}";
-            $orCr = $final . '/' . basename($d['or_cr_path']);
-            $license = $final . '/' . basename($d['license_path']);
+            $orCr = $final.'/'.basename($d['or_cr_path']);
+            $license = $final.'/'.basename($d['license_path']);
 
             $r2 = Storage::disk('r2_private');
             $r2->put($orCr, $local->readStream($d['or_cr_path']));
@@ -193,7 +220,7 @@ class CourierAuthController extends Controller
         $key = $this->key($request->email);
         $pending = Cache::get($key);
 
-        if (!$pending) {
+        if (! $pending) {
             return response()->json(['message' => 'No pending registration. Please register again.'], 422);
         }
 
@@ -219,7 +246,7 @@ class CourierAuthController extends Controller
             ->where('role', 'courier')
             ->first();
 
-        if (!$user || !Hash::check($data['password'], $user->password)) {
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'Incorrect email or password.'], 401);
         }
 
@@ -229,7 +256,7 @@ class CourierAuthController extends Controller
 
         $profile = CourierProfile::where('user_id', $user->id)->first();
 
-        if (!$profile) {
+        if (! $profile) {
             return response()->json(['message' => 'This account has no courier profile.'], 403);
         }
 
@@ -241,7 +268,7 @@ class CourierAuthController extends Controller
             ], 403);
         }
 
-        if (!$profile->is_active) {
+        if (! $profile->is_active) {
             return response()->json(['message' => 'Your account has been deactivated.'], 403);
         }
 
@@ -256,7 +283,7 @@ class CourierAuthController extends Controller
 
     private function pwKey(string $email): string
     {
-        return 'courier_pw:' . strtolower(trim($email));
+        return 'courier_pw:'.strtolower(trim($email));
     }
 
     // POST /api/courier/password/forgot -> send 6-digit code (same reply for any email)
@@ -292,13 +319,15 @@ class CourierAuthController extends Controller
         $key = $this->pwKey($request->email);
         $pending = Cache::get($key);
 
-        if (!$pending || $pending['attempts'] >= 5) {
+        if (! $pending || $pending['attempts'] >= 5) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
-        if (!Hash::check($request->otp, $pending['otp_hash'])) {
+        if (! Hash::check($request->otp, $pending['otp_hash'])) {
             $pending['attempts']++;
             Cache::put($key, $pending, now()->addMinutes(self::OTP_MINUTES));
+
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
 
@@ -323,19 +352,22 @@ class CourierAuthController extends Controller
         $key = $this->pwKey($email);
         $pending = Cache::get($key);
 
-        if (!$pending || $pending['attempts'] >= 5) {
+        if (! $pending || $pending['attempts'] >= 5) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
-        if (!Hash::check($data['otp'], $pending['otp_hash'])) {
+        if (! Hash::check($data['otp'], $pending['otp_hash'])) {
             $pending['attempts']++;
             Cache::put($key, $pending, now()->addMinutes(self::OTP_MINUTES));
+
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
 
         $user = User::whereRaw('lower(email) = ?', [$email])->where('role', 'courier')->first();
-        if (!$user) {
+        if (! $user) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
 
@@ -358,13 +390,14 @@ class CourierAuthController extends Controller
         $key = $this->pwKey($data['email']);
         $pending = Cache::get($key);
 
-        if (!$pending || empty($pending['token_hash']) || !Hash::check($data['reset_token'], $pending['token_hash'])) {
+        if (! $pending || empty($pending['token_hash']) || ! Hash::check($data['reset_token'], $pending['token_hash'])) {
             return response()->json(['message' => 'Invalid or expired request. Please start again.'], 422);
         }
 
         $user = User::whereRaw('lower(email) = ?', [strtolower(trim($data['email']))])->where('role', 'courier')->first();
-        if (!$user) {
+        if (! $user) {
             Cache::forget($key);
+
             return response()->json(['message' => 'Invalid or expired request. Please start again.'], 422);
         }
 

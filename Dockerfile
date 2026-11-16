@@ -37,9 +37,9 @@ RUN printf 'Listen ${PORT}\n' > /etc/apache2/ports.conf \
 
 ENV PORT=8080 APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr \
     LOG_LEVEL=error CACHE_STORE=file SESSION_DRIVER=file SESSION_SECURE_COOKIE=true \
-    QUEUE_CONNECTION=sync QUEUE_FAILED_DRIVER=null DB_CONNECTION=pgsql DB_SSLMODE=require \
+    QUEUE_CONNECTION=sync QUEUE_FAILED_DRIVER=null DB_CONNECTION=pgsql DB_SSLMODE=require DB_EMULATE_PREPARES=true \
     FILESYSTEM_DISK=r2_private DELIVERY_PROOFS_DISK=r2_private \
-    R2_REGION=auto MAIL_MAILER=smtp MAIL_TIMEOUT=20 TRUSTED_PROXIES=*
+    R2_REGION=auto MAIL_MAILER=resend_http MAIL_TIMEOUT=15 TRUSTED_PROXIES=*
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

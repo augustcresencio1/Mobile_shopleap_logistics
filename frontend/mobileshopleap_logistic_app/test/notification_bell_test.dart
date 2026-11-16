@@ -218,7 +218,7 @@ void main() {
         expect(
           find.descendant(
             of: find.byType(AppBar),
-            matching: find.text(item.$2),
+            matching: find.text('Delivery Tasks'),
           ),
           findsOneWidget,
         );

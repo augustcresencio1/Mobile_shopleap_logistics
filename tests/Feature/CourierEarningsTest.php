@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\CourierProfile;
 use App\Models\User;
+use App\Services\CourierDeliveryLedgerService;
+use App\Services\LedgerService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Events\TransactionCommitted;
@@ -15,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Tests\Fixtures\CourierLedgerSchema;
 use Tests\TestCase;
 
 class CourierEarningsTest extends TestCase
@@ -32,6 +35,7 @@ class CourierEarningsTest extends TestCase
         DB::purge('sqlite');
         Carbon::setTestNow(Carbon::parse('2026-11-08T12:00:00+08:00'));
         $this->createSchema();
+        CourierLedgerSchema::create();
         (require database_path('migrations/2026_11_15_040000_create_order_delivery_proofs_table.php'))->up();
         config(['delivery_proofs.disk' => 'r2_private']);
         Storage::fake('r2_private');
@@ -99,6 +103,7 @@ class CourierEarningsTest extends TestCase
             foreach (['total_amount', 'shipping_fee', 'rider_fee', 'rider_pay', 'cod_collected_amount', 'delivered_shipping_fee'] as $column) {
                 $table->decimal($column, 12, 2)->nullable();
             }
+            $table->decimal('commission_amount', 12, 2)->nullable()->default(0);
             foreach (['delivered_at', 'cod_collected_at', 'earnings_recorded_at'] as $column) {
                 $table->timestamp($column)->nullable();
             }
@@ -491,7 +496,8 @@ class CourierEarningsTest extends TestCase
         $queries = collect(DB::getQueryLog());
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'courier_profiles')));
         $this->assertCount(1, $queries->filter(fn ($query) => str_contains($query['query'], 'rider_rates')));
-        $this->assertLessThanOrEqual(5, $queries->count());
+        // Paid/unpaid totals, paid-order badges and three cached schema checks add six queries.
+        $this->assertLessThanOrEqual(11, $queries->count());
         DB::disableQueryLog();
     }
 
@@ -569,6 +575,9 @@ class CourierEarningsTest extends TestCase
         $this->submitDelivery($path)->assertOk()->assertJsonPath('earning', null);
         $this->getJson('/api/courier/earnings/summary?preset=today')->assertOk()
             ->assertJsonPath('deliveries', 1)->assertJsonPath('recorded_earnings', 0)->assertJsonPath('total_earned', '0.00');
+        $this->getJson('/api/courier/cash/summary')->assertOk()->assertJsonPath('cash_on_hand', '140.00');
+        $this->assertNotNull(DB::table('orders')->where('id', $id)->value('earnings_recorded_at'));
+        $this->assertDatabaseMissing('wallet_accounts', ['owner_type' => 'rider', 'account_type' => 'earnings_accrued']);
     }
 
     public function test_a_zero_rate_creates_a_valid_recorded_earning(): void
@@ -703,6 +712,7 @@ class CourierEarningsTest extends TestCase
                 ->assertJsonPath('data.0.proof', ['uploaded' => false, 'captured_at' => null]);
         }
         $this->assertDatabaseCount('order_delivery_proofs', 0);
+        $this->assertDatabaseCount('ledger_transactions', 0);
         $this->assertSame([], Storage::disk('r2_private')->allFiles());
     }
 
@@ -760,7 +770,9 @@ class CourierEarningsTest extends TestCase
         $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
         $this->rate();
         Event::listen(TransactionCommitted::class, function () {
-            throw new \RuntimeException('Connection lost after commit.');
+            if (DB::transactionLevel() === 0) {
+                throw new \RuntimeException('Connection lost after commit.');
+            }
         });
         $path = $this->deliveryPath($id);
         $this->submitDelivery($path)->assertStatus(503);
@@ -773,6 +785,8 @@ class CourierEarningsTest extends TestCase
         $this->assertDatabaseCount('order_delivery_proofs', 1);
         $this->assertDatabaseCount('order_events', 1);
         $this->assertSame([$saved->path], Storage::disk('r2_private')->allFiles());
+        $this->assertDatabaseCount('ledger_transactions', 2);
+        $this->assertSame('140.00', $this->balance('rider', 1, 'cash_on_hand'));
     }
 
     public function test_total_upload_limit_and_missing_migration_return_recoverable_errors(): void
@@ -794,6 +808,154 @@ class CourierEarningsTest extends TestCase
         DB::table('users')->where('id', 2)->update(['account_status' => 'inactive']);
         $this->getJson('/api/courier/dashboard')->assertForbidden()
             ->assertJsonPath('courier_status', 'hub_unavailable');
+    }
+
+    private function balance(string $ownerType, int $ownerId, string $accountType): string
+    {
+        $debitNormal = in_array($accountType, LedgerService::DEBIT_ACCOUNTS, true);
+        $entries = DB::table('ledger_entries as e')->join('wallet_accounts as a', 'a.id', '=', 'e.account_id')
+            ->where('a.owner_type', $ownerType)->where('a.owner_id', $ownerId)->where('a.account_type', $accountType)
+            ->get(['e.direction', 'e.amount']);
+
+        return LedgerService::decimal($entries->sum(fn ($entry) => LedgerService::cents((string) $entry->amount)
+            * (($entry->direction === 'debit') === $debitNormal ? 1 : -1)));
+    }
+
+    private function assertBalancedPostings(): void
+    {
+        foreach (DB::table('ledger_transactions')->pluck('id') as $transactionId) {
+            $entries = DB::table('ledger_entries')->where('transaction_id', $transactionId)->get();
+            $debits = $entries->where('direction', 'debit')->sum(fn ($entry) => LedgerService::cents((string) $entry->amount));
+            $credits = $entries->where('direction', 'credit')->sum(fn ($entry) => LedgerService::cents((string) $entry->amount));
+            $this->assertGreaterThan(0, $debits);
+            $this->assertSame($debits, $credits);
+        }
+    }
+
+    public function test_new_delivery_posts_cash_earnings_and_canonical_seller_routing_once(): void
+    {
+        $this->rate();
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null, 'commission_amount' => '12.00']);
+        $first = $this->submitDelivery($this->deliveryPath($id))->assertOk()->assertJsonPath('proof.uploaded', true)->json();
+        $this->getJson('/api/courier/cash/summary')->assertOk()->assertJsonPath('cash_on_hand', '140.00')
+            ->assertJsonPath('shortage_amount', '0.00')->assertJsonCount(1, 'orders');
+        $this->getJson('/api/courier/earnings/summary?period=all')->assertOk()
+            ->assertJsonPath('accrued_unpaid', '20.25')->assertJsonPath('paid', '0.00');
+        $this->assertSame('140.00', $this->balance('rider', 1, 'cash_on_hand'));
+        $this->assertSame('20.25', $this->balance('rider', 1, 'earnings_accrued'));
+        $this->assertSame('108.00', $this->balance('seller', 2, 'hub_receivable'));
+        $this->assertSame('108.00', $this->balance('hub', 1, 'seller_payable'));
+        $this->assertSame('12.00', $this->balance('platform', 0, 'cod_receivable'));
+        $this->assertDatabaseHas('seller_settlement_orders', ['order_id' => $id, 'seller_amount' => '108.00', 'commission_amount' => '12.00']);
+        $this->assertBalancedPostings();
+        $entries = DB::table('ledger_entries')->count();
+
+        $this->rate('60.00', '2026-11-08 03:00:00');
+        $this->submitDelivery($this->deliveryPath($id), ['amount' => '999.99'])->assertOk()->assertExactJson($first);
+        $this->assertDatabaseCount('ledger_transactions', 2);
+        $this->assertDatabaseCount('ledger_entries', $entries);
+        $this->assertDatabaseCount('seller_settlement_orders', 1);
+        $this->assertDatabaseCount('order_events', 1);
+        $this->assertDatabaseCount('order_delivery_proofs', 1);
+        $this->assertSame('140.00', $this->balance('rider', 1, 'cash_on_hand'));
+    }
+
+    public function test_a_ledger_write_failure_rolls_back_the_entire_delivery_and_a_retry_succeeds(): void
+    {
+        $this->rate();
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+        DB::unprepared("CREATE TRIGGER fail_posting BEFORE INSERT ON ledger_entries BEGIN SELECT RAISE(ABORT, 'Posting unavailable'); END");
+        $this->submitDelivery($this->deliveryPath($id))->assertStatus(503);
+        $this->assertDatabaseHas('orders', ['id' => $id, 'status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null,
+            'cod_collected_amount' => null, 'rider_pay' => null, 'earnings_recorded_at' => null]);
+        foreach (['wallet_accounts', 'ledger_transactions', 'ledger_entries', 'seller_settlement_orders', 'order_events', 'parcel_events', 'order_delivery_proofs'] as $table) {
+            $this->assertDatabaseCount($table, 0);
+        }
+        $this->assertSame([], Storage::disk('r2_private')->allFiles());
+        DB::unprepared('DROP TRIGGER fail_posting');
+        $this->submitDelivery($this->deliveryPath($id))->assertOk()->assertJsonPath('proof.uploaded', true);
+        $this->getJson('/api/courier/cash/summary')->assertOk()->assertJsonPath('cash_on_hand', '140.00');
+        $this->assertDatabaseCount('ledger_transactions', 2);
+        $this->assertBalancedPostings();
+    }
+
+    public function test_missing_financial_or_seller_routing_schema_never_partially_confirms_delivery(): void
+    {
+        $this->rate();
+        foreach (['wallet_accounts', 'ledger_transactions', 'ledger_entries', 'seller_settlement_orders'] as $table) {
+            $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+            Schema::rename($table, 'unavailable_'.$table);
+            $this->submitDelivery($this->deliveryPath($id))->assertStatus(503);
+            $this->assertDatabaseHas('orders', ['id' => $id, 'status' => 'OUT_FOR_DELIVERY', 'cod_collected_amount' => null]);
+            $this->assertDatabaseCount('order_delivery_proofs', 0);
+            $this->assertSame([], Storage::disk('r2_private')->allFiles());
+            Schema::rename('unavailable_'.$table, $table);
+        }
+        $this->assertDatabaseCount('ledger_transactions', 0);
+        $this->assertDatabaseCount('ledger_entries', 0);
+        $this->assertDatabaseCount('wallet_accounts', 0);
+    }
+
+    public function test_missing_or_invalid_saved_commission_cannot_be_guessed_during_delivery(): void
+    {
+        $this->rate();
+        foreach ([null, '121.00', '-0.01'] as $commission) {
+            $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null, 'commission_amount' => $commission]);
+            $this->submitDelivery($this->deliveryPath($id))->assertStatus(503);
+            $this->assertDatabaseHas('orders', ['id' => $id, 'status' => 'OUT_FOR_DELIVERY']);
+        }
+        $this->assertDatabaseCount('ledger_transactions', 0);
+        $this->assertDatabaseCount('order_events', 0);
+        $this->assertDatabaseCount('order_delivery_proofs', 0);
+        $this->assertSame([], Storage::disk('r2_private')->allFiles());
+    }
+
+    public function test_cod_variance_keeps_balanced_entries_and_the_exact_actual_cash(): void
+    {
+        $this->rate();
+        foreach ([['130.15', 'debit', '9.85'], ['150.25', 'credit', '10.25']] as [$cash, $direction, $variance]) {
+            $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+            $this->submitDelivery($this->deliveryPath($id), ['amount' => $cash])->assertOk();
+            $line = DB::table('ledger_entries as e')->join('wallet_accounts as a', 'a.id', '=', 'e.account_id')
+                ->join('ledger_transactions as t', 't.id', '=', 'e.transaction_id')
+                ->where('t.order_id', $id)->where('a.account_type', 'collection_variance')->first(['e.direction', 'e.amount']);
+            $this->assertSame($direction, $line->direction);
+            $this->assertSame($variance, LedgerService::decimal(LedgerService::cents((string) $line->amount)));
+        }
+        $this->getJson('/api/courier/cash/summary')->assertOk()->assertJsonPath('cash_on_hand', '280.40');
+        $this->assertBalancedPostings();
+    }
+
+    public function test_legacy_seller_routing_setting_keeps_the_same_main_web_delivery_posting(): void
+    {
+        config(['money.logistics_seller_settlements' => false]);
+        $this->rate();
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null, 'commission_amount' => '12.00']);
+        $this->submitDelivery($this->deliveryPath($id))->assertOk();
+        $this->assertDatabaseCount('ledger_transactions', 1);
+        $this->assertDatabaseCount('seller_settlement_orders', 0);
+        $this->assertSame('120.00', $this->balance('hub', 1, 'cod_to_remit'));
+        $this->assertSame('120.00', $this->balance('platform', 0, 'cod_receivable'));
+        $this->assertSame('140.00', $this->balance('rider', 1, 'cash_on_hand'));
+        $this->assertBalancedPostings();
+    }
+
+    public function test_a_changed_payload_cannot_overwrite_the_committed_delivery_ledger(): void
+    {
+        $this->rate();
+        $id = $this->order(['status' => 'OUT_FOR_DELIVERY', 'delivered_at' => null]);
+        $this->submitDelivery($this->deliveryPath($id))->assertOk();
+        $snapshot = DB::table('orders')->where('id', $id)->first();
+        $snapshot->cod_collected_amount = '150.00';
+        try {
+            DB::transaction(fn () => app(CourierDeliveryLedgerService::class)->recordNewDelivery($snapshot));
+            $this->fail('A changed ledger payload must fail.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('idempotency key', $exception->getMessage());
+        }
+        $this->assertDatabaseCount('ledger_transactions', 2);
+        $this->assertSame('140.00', $this->balance('rider', 1, 'cash_on_hand'));
+        $this->assertBalancedPostings();
     }
 
     public function test_existing_history_returns_scalar_nullable_money_and_zero_for_returns(): void

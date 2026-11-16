@@ -66,10 +66,10 @@ class ApiClient {
   static int get revision => _revision;
 
   /// Old requests cannot repopulate the cache after a mutation or logout.
-  static void invalidateCache() {
+  static void invalidateCache({bool keepPending = false}) {
     _revision++;
     _cache.clear();
-    _pending.clear();
+    if (!keepPending) _pending.clear();
   }
 
   static String _cacheKey(String path, Map<String, String>? query, bool auth) =>
@@ -151,7 +151,7 @@ class ApiClient {
     final pending = _pending[key];
     if (pending != null) return pending;
     final revision = _revision;
-    final request = _send(
+    final request = _read(
       auth,
       () async => http.get(
         _uri(path, query),
@@ -167,6 +167,31 @@ class ApiClient {
       return data;
     } finally {
       if (identical(_pending[key], request)) _pending.remove(key);
+    }
+  }
+
+  /// Retry a transient read once, sharing the retry with concurrent callers.
+  /// Writes are never replayed: an upload may already have reached the server.
+  static Future<dynamic> _read(
+    bool auth,
+    Future<http.Response> Function() call,
+  ) async {
+    final session = sessionChanged.value;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _send(auth, call);
+      } on ApiException catch (error) {
+        final status = error.statusCode;
+        final transient =
+            status == null ||
+            const [500, 502, 503, 504].contains(status) ||
+            (status >= 200 && status < 300);
+        if (attempt >= 1 || !transient || session != sessionChanged.value) {
+          rethrow;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        if (session != sessionChanged.value) rethrow;
+      }
     }
   }
 
@@ -338,9 +363,11 @@ class ApiClient {
     bool html = false,
   }) async {
     dynamic body;
+    var validJson = true;
     try {
       body = res.body.isEmpty ? {} : jsonDecode(res.body);
     } catch (_) {
+      validJson = false;
       body = {};
     }
 
@@ -357,6 +384,12 @@ class ApiClient {
           );
         }
         return res.body;
+      }
+      if (!validJson) {
+        throw ApiException(
+          'The server returned an unexpected response. Please try again.',
+          res.statusCode,
+        );
       }
       return body;
     }
@@ -405,7 +438,13 @@ class ApiClient {
       msg = 'Too many requests. Please wait before retrying.';
     }
     if (res.statusCode >= 500) {
-      msg = 'Server problem. Please try again later.';
+      msg = switch (map['code']) {
+        'REGISTRATION_EMAIL_UNAVAILABLE' =>
+          'Verification email could not be sent. Please try again later.',
+        'REGISTRATION_UNAVAILABLE' =>
+          'Registration is temporarily unavailable. Please try again later.',
+        _ => 'Server problem. Please try again later.',
+      };
     }
     if (res.statusCode == 413) {
       msg =

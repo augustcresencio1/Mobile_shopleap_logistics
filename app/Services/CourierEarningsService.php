@@ -116,7 +116,7 @@ class CourierEarningsService
             ->whereRaw("$finished < ?", [$range['end']]);
     }
 
-    public function summary(CourierProfile $courier, array $range, ?array $rate = null): array
+    public function summary(CourierProfile $courier, array $range, ?array $rate = null, bool $includePayouts = true): array
     {
         $finished = $this->deliveredAt();
         $day = DB::getDriverName() === 'sqlite'
@@ -155,6 +155,7 @@ class CourierEarningsService
             'recorded_earnings' => (int) $rows->sum('recorded_earnings'),
             'cod_collected' => $this->fromCents($codCents),
             'daily' => $daily,
+            ...($includePayouts ? app(CourierMoneyService::class)->earningsTotals($courier->id, $range) : []),
         ];
     }
 
@@ -172,6 +173,7 @@ class CourierEarningsService
             ->addSelect('proof.id as delivery_proof_id', 'proof.captured_at as proof_captured_at')
             ->selectRaw("$finished as finished_at")
             ->orderByRaw("$finished desc")->orderByDesc('o.id')->paginate(20);
+        $paid = app(CourierMoneyService::class)->paidOrderIds($courier->id, $page->getCollection()->pluck('id')->all());
 
         return [
             'data' => $page->getCollection()->map(fn ($order) => [
@@ -183,6 +185,7 @@ class CourierEarningsService
                 'recorded_at' => $this->timestamp($order->earnings_recorded_at),
                 'delivered_at' => $this->timestamp($order->finished_at),
                 'proof' => CourierDeliveryProofService::metadata($order->delivery_proof_id !== null, $order->proof_captured_at),
+                'payout_status' => $paid === null ? null : ($paid->has($order->id) ? 'paid' : 'accrued'),
             ])->values(),
             'meta' => [
                 'current_page' => $page->currentPage(),

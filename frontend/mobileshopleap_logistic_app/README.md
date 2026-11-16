@@ -1,7 +1,7 @@
 # mobileshopleap_logistic_app
 
 Shopleap courier/rider app. The default Laravel API is
-`https://shopleap.shop/api`. The logistics subdomain is the hub web portal and
+`https://shopleap-rider-api-august.onrender.com/api`. The logistics subdomain is the hub web portal and
 must not be used for courier endpoints.
 
 ## API configuration
@@ -10,7 +10,7 @@ Run the deployed configuration without a local Laravel server or USB API port
 forwarding:
 
 ```powershell
-flutter run --dart-define=API_BASE_URL=https://shopleap.shop/api
+flutter run --dart-define=API_BASE_URL=https://shopleap-rider-api-august.onrender.com/api
 ```
 
 The same URL is the default for builds without a define. Service paths start
@@ -32,6 +32,11 @@ Sign in through the app with an approved, active rider account. Login posts to
 base URL. Older unscoped tokens are ignored, so upgrading requires signing in
 again. JSON requests send `Accept: application/json`. Receipt HTML is fetched
 with authentication in memory and opened in the existing native receipt viewer.
+
+The rider backend is on Render Free. Transient JSON GET failures retry once;
+uploads and other mutations are never automatically replayed. Unvisited tabs
+load when opened. See `docs/rider-render-reliability.md` in the workspace root
+for the backend fixes, the release APK and the remaining money/email setup.
 
 Do not run Laravel migrations or ledger backfills from this mobile workspace.
 Route availability does not establish ledger completeness. Review authenticated

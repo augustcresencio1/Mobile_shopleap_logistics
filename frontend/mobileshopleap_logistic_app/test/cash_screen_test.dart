@@ -183,6 +183,10 @@ void main() {
           fail = true;
           LiveRefresh.deliveryCompleted();
           await tester.pumpAndSettle();
+          if (status == 503) {
+            await tester.pump(const Duration(milliseconds: 800));
+            await tester.pumpAndSettle();
+          }
           expect(find.text('₱930.00'), findsNothing);
           expect(
             find.text(switch (status) {

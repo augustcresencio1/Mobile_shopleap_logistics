@@ -40,6 +40,8 @@ void main() {
             );
           }
           expect(requests.any((path) => path.endsWith('/home')), isFalse);
+          // Unvisited history/settings/account tabs must stay unmounted.
+          expect(requests.where((p) => p.endsWith('/me')).length, 1);
           expect(
             requests.any(
               (p) => p.contains('/earnings') || p.contains('/cash/'),

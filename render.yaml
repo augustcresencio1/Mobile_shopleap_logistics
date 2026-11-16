@@ -22,6 +22,14 @@ services:
         value: pgsql
       - key: DB_SSLMODE
         value: require
+      - key: DB_EMULATE_PREPARES
+        value: "true"
+      - key: MAIL_MAILER
+        value: resend_http
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM_ADDRESS
+        sync: false
       - key: DB_HOST
         sync: false
       - key: DB_PORT
