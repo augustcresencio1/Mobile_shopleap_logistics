@@ -43,7 +43,7 @@ to the live Render service.
   `photo` upload field. Account profile/photo/password routes are accessible before
   approval. Province and municipality are now saved by the profile controller.
 - The APK targets the rider Render API, retains the existing application ID and
-  development signing key, and uses build number 20261118 / version 1.0.1.
+  development signing key, and uses build number 20261119 / version 1.0.2.
 - `CourierMoneyService` follows the main web app's `MoneyMovementQueries` and
   `PayoutQueries`: only frozen rider ownership and unreversed delivery postings
   qualify for cash/payout calculations. Handover allocations reduce parcel cash;
@@ -54,6 +54,13 @@ to the live Render service.
   HTML with inline styles and escaped values, without web build assets or scripts.
   Paid/unpaid values remain unavailable when payout tables are missing; cash
   returns a 503 instead of pretending that an absent schema means zero cash.
+- New deliveries now post through the main web app's `LedgerService` and its
+  idempotency keys inside the same transaction as proof metadata, COD, status,
+  frozen earnings and order events. Seller funds use the same logistics-routing
+  entries and `seller_settlement_orders` allocation as the main web backend.
+  Missing or inconsistent financial data rolls back the delivery and removes the
+  new proof file. A committed retry returns the original snapshot without posting
+  again. Missing rates keep pay unavailable while recording real collected cash.
 
 ## Render deployment
 
@@ -69,14 +76,17 @@ MAIL_MAILER=resend_http
 RESEND_API_KEY=<set securely in Render>
 MAIL_FROM_ADDRESS=<sender verified with the email provider>
 MAIL_FROM_NAME=Shopleap Rider
+LOGISTICS_SELLER_SETTLEMENTS=true
 ```
 
 An existing Render environment value overrides Docker defaults. In particular,
 change an existing `MAIL_MAILER=smtp` value. An API key alone does not establish
 sender verification or live delivery. Do not paste keys or passwords into chat.
-No migrations, ledger reconstruction, backfill or production record changes are
-part of this patch. The existing startup script rebuilds Laravel's configuration
-and route caches on deployment.
+Match `LOGISTICS_SELLER_SETTLEMENTS` to the main web backend (its source default
+is true). No migrations, historical reconstruction, backfill or production record
+changes were performed during development. New live deliveries will create their
+normal balanced postings after deployment. The startup script rebuilds Laravel's
+configuration and route caches on deployment.
 
 Install the new APK over the existing rider app and sign in again if necessary.
 Rebuilding an APK alone does not deploy Laravel fixes. An existing APK can use
@@ -86,7 +96,7 @@ compatible backend fixes after the same Render API URL is redeployed.
 
 - Full Flutter suite: 219 passed. Final startup test also checks that unvisited
   account tabs do not make extra profile requests.
-- Full Laravel suite: 95 tests, 1,263 assertions, passed on isolated in-memory
+- Full Laravel suite: 102 tests, 1,377 assertions, passed on isolated in-memory
   SQLite. Mail tests use synthetic credentials and mocked HTTPS responses.
 - Flutter analysis: no errors or warnings; existing informational findings remain.
 - Release APK built for ARM32, ARM64 and x86-64; Android signature verified.
@@ -98,14 +108,18 @@ compatible backend fixes after the same Render API URL is redeployed.
   `fb497769ca0345856a25cddf28c2c1baed848397` in
   `delmundo-maverick/Shopleap-Web-App`. Reference source is in
   `.reference/shopleap-money`; the old Downloads checkout was not changed.
-- This patch exposes saved financial records only. The standalone rider delivery
-  controller still does not call the web app's `OrderLedger::delivered`. The
-  canonical atomic posting flow, including current seller routing, must be
-  integrated before treating new rider-only deliveries as a complete accounting
-  cutover. Do not backfill old deliveries or create entries while loading Cash.
+- The delivery posting gap has been closed by `CourierDeliveryLedgerService`,
+  adapting `OrderLedger::delivered` and `SellerSettlements::routeOrder` while
+  sharing the canonical `LedgerService`, references, accounts and keys. Tests
+  cover cash/earnings visibility, balanced debit/credit entries, seller routing,
+  missing rates, commission validation, schema failures, storage cleanup,
+  changed-payload rejection and lost commit acknowledgements. Older delivered
+  orders are never backfilled by a retry or a Cash read.
 - Before deploying, confirm the Render service uses the same PostgreSQL database
-  containing `ledger_transactions`, `rider_cash_handovers`,
+  containing `wallet_accounts`, `ledger_transactions`, `ledger_entries`,
+  `seller_settlement_orders`, `rider_cash_handovers`,
   `rider_cash_handover_items`, `rider_payouts`, `rider_payout_items`, and
-  `notifications`. These migrations belong to the main financial backend and
-  were not run from this workspace. No APK rebuild is needed for these compatible
-  backend read endpoints; the earlier Render APK already calls them.
+  `notifications`, as well as the recorded `orders.commission_amount`. These
+  migrations belong to the main financial backend and were not run from this
+  workspace. The new APK retains the same endpoint contract and a higher version
+  code for installation over the existing rider app.

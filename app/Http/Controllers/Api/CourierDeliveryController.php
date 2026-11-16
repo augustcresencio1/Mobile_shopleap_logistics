@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CourierProfile;
 use App\Models\Message;
+use App\Services\CourierDeliveryLedgerService;
 use App\Services\CourierDeliveryProofService;
 use App\Services\CourierEarningsService;
 use App\Services\RiderRefresh;
@@ -488,13 +489,16 @@ class CourierDeliveryController extends Controller
                     'earning_courier_id' => $me->id,
                     'rider_pay' => $rate ? $earnings->money($rate->amount) : null,
                     'delivered_shipping_fee' => $order->shipping_fee,
-                    'earnings_recorded_at' => $rate ? $now : null,
+                    // A missing rate leaves pay null; collected cash still needs its frozen snapshot.
+                    'earnings_recorded_at' => $now,
                     'updated_at' => $now,
                 ];
                 DB::table('orders')->where('id', $order->id)->update($update);
                 $this->logEvent($order->id, $r->user()->id, 'DELIVERED', 'Delivered to buyer', fromStatus: 'OUT_FOR_DELIVERY');
 
-                $result = ['earning' => $earnings->snapshot(DB::table('orders')->where('id', $order->id)->first()),
+                $recorded = DB::table('orders')->where('id', $order->id)->first();
+                app(CourierDeliveryLedgerService::class)->recordNewDelivery($recorded);
+                $result = ['earning' => $earnings->snapshot($recorded),
                     'proof' => $proofs::metadata(true, $proof['captured_at'])];
                 $readyToCommit = true;
 
