@@ -176,40 +176,46 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _submit() async {
+    if (_loading) return;
     setState(() => _loading = true);
-    final err = await AuthService.register(
-      fields: {
-        'last_name': _last.text.trim(),
-        'first_name': _first.text.trim(),
-        'middle_initial': _mi.text.trim(),
-        'sex': _sex!,
-        'email': _email.text.trim(),
-        'contact_no': _contact.text.trim(),
-        'birthday': DateFormat('yyyy-MM-dd').format(_birthday!),
-        'province': _province!['name'],
-        'municipality': _municipality!['name'],
-        'barangay': _barangay!['name'],
-        'street_address': [
-          _house.text.trim(),
-          _street.text.trim(),
-        ].where((s) => s.isNotEmpty).join(', '),
-        'vehicle_type': _vehicle!,
-        'plate_number': _plate.text.trim(),
-        'hub_id': _hub!['id'].toString(),
-        'password': _pass.text,
-        'password_confirmation': _pass2.text,
-      },
-      orCr: _orCr!,
-      license: _idLicense!,
-    );
-    if (!mounted) return;
-    setState(() => _loading = false);
-    if (err != null) return _snack(err);
+    try {
+      final err = await AuthService.register(
+        fields: {
+          'last_name': _last.text.trim(),
+          'first_name': _first.text.trim(),
+          'middle_initial': _mi.text.trim(),
+          'sex': _sex!,
+          'email': _email.text.trim(),
+          'contact_no': _contact.text.trim(),
+          'birthday': DateFormat('yyyy-MM-dd').format(_birthday!),
+          'province': _province!['name'],
+          'municipality': _municipality!['name'],
+          'barangay': _barangay!['name'],
+          'street_address': [
+            _house.text.trim(),
+            _street.text.trim(),
+          ].where((s) => s.isNotEmpty).join(', '),
+          'vehicle_type': _vehicle!,
+          'plate_number': _plate.text.trim(),
+          'hub_id': _hub!['id'].toString(),
+          'password': _pass.text,
+          'password_confirmation': _pass2.text,
+        },
+        orCr: _orCr!,
+        license: _idLicense!,
+      );
+      if (!mounted) return;
+      if (err != null) return _snack(err);
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => OtpScreen(email: _email.text.trim())),
-    );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OtpScreen(email: _email.text.trim())),
+      );
+    } catch (_) {
+      _snack('Registration could not be submitted. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   // ---------- field helpers ----------

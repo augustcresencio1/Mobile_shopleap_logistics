@@ -26,4 +26,7 @@ foreach ($checks as $message => $passed) if (!$passed) { fwrite(STDERR, $message
 if (getenv('RENDER') && getenv('MAIL_MAILER') === 'smtp') {
     fwrite(STDERR, 'OTP email is not ready on Render Free: configure an HTTPS email relay before using registration or password reset.'.PHP_EOL);
 }
+if (getenv('MAIL_MAILER') === 'resend_http' && !getenv('RESEND_API_KEY')) {
+    fwrite(STDERR, 'OTP email is not configured: set RESEND_API_KEY and a verified MAIL_FROM_ADDRESS before testing registration.'.PHP_EOL);
+}
 echo 'Runtime configuration checked. No database records or uploads were changed.'.PHP_EOL;

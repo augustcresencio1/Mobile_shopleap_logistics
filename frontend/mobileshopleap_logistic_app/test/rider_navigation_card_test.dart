@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobileshopleap_logistic_app/core/services/api_client.dart';
 import 'package:mobileshopleap_logistic_app/core/services/order_service.dart';
 import 'package:mobileshopleap_logistic_app/core/services/rider_tracking_service.dart';
@@ -81,6 +82,7 @@ void main() {
   late PhoneGps gps;
   late GeolocatorPlatform originalGps;
   setUp(() {
+    SharedPreferences.setMockInitialValues({'battery_prompt_shown_v1': true});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('shopleap/rider_tracking'),
@@ -139,6 +141,8 @@ void main() {
         expect(gps.requests, 0);
         expect(gps.reads, 0);
         await tester.tap(find.text('Start live trip'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Sige'));
         await tester.pumpAndSettle();
         expect(gps.requests, 1);
         expect(gps.positions.hasListener, isTrue);

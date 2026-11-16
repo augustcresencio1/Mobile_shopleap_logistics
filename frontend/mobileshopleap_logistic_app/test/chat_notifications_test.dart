@@ -200,7 +200,7 @@ void main() {
         expect(unreadCount(tester), 5);
         expect(navText('5'), findsOneWidget);
 
-        await tester.tap(navText('Pickup'));
+        await tester.tap(navText('Tasks'));
         await tester.pumpAndSettle();
         api.sellerUnread = 101;
         LiveRefresh.pokeNow();
@@ -210,6 +210,8 @@ void main() {
 
         api.failChats = true;
         LiveRefresh.pokeNow();
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 800));
         await tester.pumpAndSettle();
         expect(unreadCount(tester), 104);
 

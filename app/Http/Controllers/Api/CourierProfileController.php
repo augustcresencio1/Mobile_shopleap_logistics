@@ -76,6 +76,8 @@ class CourierProfileController extends Controller
             'contact_no' => ['sometimes', 'regex:/^09\d{9}$/'],
             'vehicle_type' => 'sometimes|in:Trike,Motor,Van',
             'plate_number' => 'sometimes|string|max:20',
+            'province' => 'sometimes|string|max:100',
+            'municipality' => 'sometimes|string|max:100',
             'barangay' => 'sometimes|string|max:100',
             'street_address' => 'sometimes|nullable|string|max:255',
         ]);
@@ -84,6 +86,7 @@ class CourierProfileController extends Controller
             $profileData = Arr::only($data, [
                 'first_name', 'last_name', 'contact_no', 'vehicle_type',
                 'plate_number', 'barangay', 'street_address',
+                'province', 'municipality',
             ]);
             if ($profileData) {
                 $p->update($profileData);
@@ -115,12 +118,13 @@ class CourierProfileController extends Controller
             return response()->json(['message' => 'Profile photo is not available yet.'], 503);
         }
 
+        $field = ! $r->hasFile('photo') && $r->hasFile('avatar') ? 'avatar' : 'photo';
         $r->validate([
-            'photo' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            $field => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
         ]);
 
         $p = $this->profile($r);
-        $file = $r->file('photo');
+        $file = $r->file($field);
         $ext = strtolower($file->guessExtension() ?: 'jpg');
         $path = 'courier_photos/'.$p->id.'/'.Str::uuid().'.'.$ext;
 
@@ -148,6 +152,27 @@ class CourierProfileController extends Controller
         return response()->json(array_merge(
             ['message' => 'Photo updated.'],
             $this->payload($r, $p->fresh())
+        ));
+    }
+
+    public function removePhoto(Request $r)
+    {
+        if (! Schema::hasColumn('courier_profiles', 'profile_photo_path')) {
+            return response()->json(['message' => 'Profile photo is not available yet.'], 503);
+        }
+        $profile = $this->profile($r);
+        $old = $profile->profile_photo_path;
+        $profile->forceFill(['profile_photo_path' => null])->save();
+        if ($old) {
+            try {
+                Storage::disk('r2_private')->delete($old);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return response()->json(array_merge(
+            ['message' => 'Photo removed.'], $this->payload($r, $profile->fresh())
         ));
     }
 }

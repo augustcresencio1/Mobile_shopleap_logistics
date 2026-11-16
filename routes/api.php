@@ -30,6 +30,12 @@ Route::prefix('courier')->group(function () {
 Route::middleware(['auth:sanctum', 'role:courier'])->prefix('courier')->group(function () {
     Route::get('me', [CourierProfileController::class, 'show']);
     Route::post('logout', [CourierAuthController::class, 'logout']);
+    // Account access is needed while a courier is still awaiting approval.
+    Route::post('account/profile', [CourierProfileController::class, 'update'])->middleware('throttle:20,1');
+    Route::post('account/photo', [CourierProfileController::class, 'uploadPhoto'])->middleware('throttle:10,1');
+    Route::post('account/avatar', [CourierProfileController::class, 'uploadPhoto'])->middleware('throttle:10,1');
+    Route::delete('account/avatar', [CourierProfileController::class, 'removePhoto'])->middleware('throttle:10,1');
+    Route::post('account/password', [CourierDeliveryController::class, 'changePassword'])->middleware('throttle:5,1');
 
     Route::middleware('courier.approved')->group(function () {
         // BAGO: lahat ng kailangan ng Home tab at ng bell sa iisang request
@@ -79,13 +85,6 @@ Route::middleware(['auth:sanctum', 'role:courier'])->prefix('courier')->group(fu
 
         Route::get('account', [CourierDeliveryController::class, 'account']);
         Route::put('account', [CourierDeliveryController::class, 'updateAccount']);
-        Route::post('account/password', [CourierDeliveryController::class, 'changePassword'])
-            ->middleware('throttle:5,1');
-
-        Route::post('account/profile', [CourierProfileController::class, 'update'])
-            ->middleware('throttle:20,1');
-        Route::post('account/photo', [CourierProfileController::class, 'uploadPhoto'])
-            ->middleware('throttle:10,1');
     });
 });
 Route::get('/hubs', [CourierAuthController::class, 'hubs']);

@@ -6,7 +6,7 @@ class ApiConfig {
 
   static const String localBaseUrl = 'http://127.0.0.1:8000/api';
 
-  // Rider-only Laravel API deployed in the August Render account.
+  // Rider backend deployed from augustcresencio1/Mobile_shopleap_logistics.
   static const String productionBaseUrl =
       'https://shopleap-rider-api-august.onrender.com/api';
 
@@ -28,7 +28,9 @@ class ApiConfig {
       throw ArgumentError('API_BASE_URL must be an HTTP(S) backend URL.');
     }
     if (uri.host.toLowerCase() == 'logistics.shopleap.shop') {
-      throw ArgumentError('Use the rider API address, not the logistics portal.');
+      throw ArgumentError(
+        'Use the rider API address, not the logistics portal.',
+      );
     }
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     while (segments.isNotEmpty && segments.last == 'api') {

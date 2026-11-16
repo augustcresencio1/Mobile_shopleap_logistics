@@ -1,5 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
+import 'package:http_parser/http_parser.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
 import 'rider_tracking_service.dart';
@@ -92,6 +94,41 @@ class AuthService {
   });
 
   // ---------- Register + OTP ----------
+  static Future<http.MultipartFile> _document(String field, XFile file) async {
+    const maxBytes = 5 * 1024 * 1024;
+    try {
+      if (await file.length() > maxBytes) {
+        throw ApiException('Each registration photo must be at most 5 MB.');
+      }
+      final bytes = await file.readAsBytes();
+      final type = switch (img.findDecoderForData(bytes)?.format) {
+        img.ImageFormat.jpg => 'jpeg',
+        img.ImageFormat.png => 'png',
+        img.ImageFormat.webp => 'webp',
+        img.ImageFormat.gif => 'gif',
+        img.ImageFormat.bmp => 'bmp',
+        _ => null,
+      };
+      if (bytes.isEmpty || bytes.length > maxBytes || type == null) {
+        throw ApiException(
+          'Choose a JPG, PNG, WebP, GIF, or BMP registration photo of at most 5 MB.',
+        );
+      }
+      return http.MultipartFile.fromBytes(
+        field,
+        bytes,
+        filename: '$field.${type == 'jpeg' ? 'jpg' : type}',
+        contentType: MediaType('image', type),
+      );
+    } on ApiException {
+      rethrow;
+    } catch (_) {
+      throw ApiException(
+        'Cannot read the selected photo. Please select it again.',
+      );
+    }
+  }
+
   static Future<String?> register({
     required Map<String, String> fields,
     required XFile orCr,
@@ -106,16 +143,8 @@ class AuthService {
       auth: false,
       fields: f,
       files: [
-        http.MultipartFile.fromBytes(
-          'or_cr_upload',
-          await orCr.readAsBytes(),
-          filename: orCr.name,
-        ),
-        http.MultipartFile.fromBytes(
-          'license_upload',
-          await license.readAsBytes(),
-          filename: license.name,
-        ),
+        await _document('or_cr_upload', orCr),
+        await _document('license_upload', license),
       ],
     );
   });

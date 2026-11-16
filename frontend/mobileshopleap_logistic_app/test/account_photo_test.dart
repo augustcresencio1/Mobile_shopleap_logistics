@@ -66,7 +66,7 @@ void main() {
   });
 
   test(
-    'Upload uses the avatar route, bearer and locally validated photo field',
+    'Upload uses the avatar route, bearer and matching avatar field',
     () async {
       late http.Request uploaded;
       await http.runWithClient(
@@ -95,7 +95,7 @@ void main() {
         uploaded.headers['content-type'],
         startsWith('multipart/form-data;'),
       );
-      expect(latin1.decode(uploaded.bodyBytes), contains('name="photo"'));
+      expect(latin1.decode(uploaded.bodyBytes), contains('name="avatar"'));
       expect(uploaded.bodyBytes, containsAllInOrder(proofPhoto));
     },
   );
